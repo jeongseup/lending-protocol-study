@@ -287,6 +287,166 @@ Aave V3 현재: 대부분 자산에서 Stable Rate 비활성화
 
 ---
 
+## Scaled Balance 심화 — 왜 가스비를 절약하는가?
+
+### "스케일링"이란?
+
+```
+Scaled Balance = 예치 시점의 index로 나눈 값 (정규화된 값)
+              = 예치금 / 예치 시점의 liquidityIndex
+
+예시:
+  예치: 1,000 USDC, 이때 liquidityIndex = 1.02
+  scaledBalance = 1,000 / 1.02 = 980.39
+
+  나중에: liquidityIndex = 1.07
+  실제 잔고 = 980.39 × 1.07 = 1,048.82 USDC (이자 포함)
+
+핵심: scaledBalance는 한번 저장하면 안 바꿔도 됨
+     index만 전역으로 업데이트하면 됨
+```
+
+### V1 vs V2 — 이자 반영 방식 비교
+
+```
+V1 (순진한 rebase 방식):
+  이자 발생할 때마다 모든 사용자의 잔고를 업데이트해야 함
+
+  사용자 1,000명이 예치한 상태에서 이자 발생:
+  → user[0].balance = 새 값   ← SSTORE (스토리지 쓰기)
+  → user[1].balance = 새 값   ← SSTORE
+  → ...
+  → user[999].balance = 새 값 ← SSTORE
+  = 1,000번의 SSTORE 필요!
+
+V2+ (scaled balance 방식):
+  이자 발생할 때 전역 변수 1개만 업데이트
+
+  사용자 1,000명이 예치한 상태에서 이자 발생:
+  → liquidityIndex = 새 값    ← SSTORE 1번만!
+
+  각 사용자의 잔고는?
+  → balanceOf(user) 호출 시 계산: scaledBalance × liquidityIndex
+  → 이건 읽기(SLOAD)만 하면 됨, 쓰기(SSTORE) 안 함
+```
+
+### EVM 옵코드 가스 비용
+
+```
+SSTORE (스토리지에 쓰기):
+  - 0 → non-zero:  20,000 gas  (새 슬롯에 처음 쓰기)
+  - non-zero → non-zero: 5,000 gas (기존 값 수정)
+
+SLOAD (스토리지에서 읽기):
+  - Cold (처음 읽기): 2,100 gas
+  - Warm (같은 tx에서 재읽기): 100 gas
+
+MUL (곱셈): 5 gas
+DIV (나눗셈): 5 gas
+
+비율:
+  쓰기는 읽기보다 ~2.4배 비쌈
+  쓰기는 계산보다 ~1,000배 비쌈!
+```
+
+### 왜 SSTORE가 비싼가? — EVM 코어 레벨
+
+```
+SLOAD (읽기):
+  1. 메모리에서 Merkle Patricia Trie 탐색
+  2. 해당 storage slot의 값을 읽어옴
+  → 트리 탐색만 하면 됨
+
+SSTORE (쓰기):
+  1. 기존 값 읽기 (SLOAD와 같은 과정)
+  2. 새 값을 storage slot에 쓰기
+  3. ★ Merkle Patricia Trie 재계산 ★
+     → 변경된 노드부터 루트까지 모든 해시를 다시 계산
+     → 이게 진짜 비싼 이유!
+  4. State root 업데이트
+  5. 디스크에 영구 저장 (모든 노드가 이 데이터를 저장해야 함)
+
+핵심: 쓰기는 "전세계 이더리움 노드의 디스크에 영구히 저장"되는 것
+     → 네트워크 전체의 저장 비용을 가스비로 지불
+     → 읽기는 그냥 내 노드에서 조회만 하면 됨
+```
+
+### 구체적 가스비 비교
+
+```
+시나리오: 사용자 1,000명, 이자 업데이트 1회
+
+V1 (모든 사용자 잔고 업데이트):
+  1,000 × SSTORE(5,000) = 5,000,000 gas
+  + 오버헤드 ≈ 총 ~7,000,000 gas
+  → 가스비 (~30 gwei, ETH $3,000): 약 $630 per update!
+
+V2+ (전역 index만 업데이트):
+  1 × SSTORE(5,000) = 5,000 gas
+  + 약간의 계산 ≈ 총 ~30,000 gas
+  → 가스비: 약 $2.70 per update
+
+  절약: $630 → $2.70 = 99.6% 절약!
+
+balanceOf() 호출 시 (V2+ 추가 비용):
+  SLOAD(scaledBalance) + SLOAD(liquidityIndex) + MUL + DIV
+  = 2,100 + 2,100 + 5 + 5 = 4,210 gas
+  → view 함수이므로 외부 호출 시 가스비 0 (eth_call)
+```
+
+### 코드 레벨 비교
+
+```solidity
+// ===== V1: 순진한 rebase (가스 비쌈) =====
+contract ATokenV1 {
+    mapping(address => uint256) public balances;
+    address[] public users;
+
+    // 이자 발생할 때마다 호출 — O(N) SSTORE!
+    function accrueInterest(uint256 rate) external {
+        for (uint i = 0; i < users.length; i++) {
+            balances[users[i]] = balances[users[i]] * rate / 1e18;
+            // ↑ 매번 SSTORE × N명
+        }
+    }
+
+    function balanceOf(address user) public view returns (uint256) {
+        return balances[user];  // 그냥 읽기만
+    }
+}
+
+// ===== V2+: Scaled Balance (가스 절약) =====
+contract ATokenV2 {
+    mapping(address => uint256) internal _scaledBalances;
+    // liquidityIndex는 Pool 컨트랙트에 전역 1개만 저장
+
+    function balanceOf(address user) public view returns (uint256) {
+        return _scaledBalances[user] * pool.liquidityIndex() / 1e27;
+        // ↑ SLOAD 2번 + MUL + DIV = ~4,210 gas
+        // view 함수 → 외부 호출 시 가스비 0!
+    }
+
+    function scaledBalanceOf(address user) public view returns (uint256) {
+        return _scaledBalances[user];  // 정규화된 원본 값
+    }
+}
+```
+
+```
+핵심 인사이트:
+  "계산을 읽기 시점으로 미룬다" = "쓰기를 없앤다"
+
+  V1: 쓰기 시점에 모든 사용자 잔고 업데이트 (비쌈)
+  V2: 읽기 시점에 곱셈 1번 (거의 공짜)
+
+  이건 cToken의 exchangeRate와도 같은 원리:
+  → cToken도 exchange_rate 전역 1개만 업데이트
+  → 인출할 때 shares × exchangeRate로 계산
+  → 결국 둘 다 "쓰기를 최소화하고 읽기에서 계산" 하는 전략
+```
+
+---
+
 ## 우리 프로젝트의 LToken
 
 ```
