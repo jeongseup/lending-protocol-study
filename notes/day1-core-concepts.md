@@ -1,0 +1,49 @@
+# Day 1: 핵심 개념 + 첫 스마트 컨트랙트
+# Day 1: Core Concepts + First Smart Contract
+
+## 오전 — 이론 (2시간) / Morning — Theory (2h)
+
+### 핵심 개념 / Key Concepts
+
+#### LTV (Loan-to-Value) — 담보 대비 대출 비율
+- LTV = 대출금 / 담보 가치 × 100%
+- LTV = Loan Amount / Collateral Value × 100%
+- 예: ETH $2,000 담보, $1,500 대출 → LTV = 75%
+- Example: ETH $2,000 collateral, $1,500 borrow → LTV = 75%
+
+#### Health Factor — 헬스팩터 (청산 지표)
+- HF = Σ(담보 × 가격 × 청산기준) / Σ(부채 × 가격)
+- HF = Σ(collateral × price × liquidation_threshold) / Σ(debt × price)
+- HF > 1: 안전 / Safe
+- HF < 1: 청산 가능! / Liquidatable!
+- **스테이킹 비유**: 검증자 유효 잔액과 유사 — 임계값 이하로 내려가면 슬래싱(청산)
+
+#### Utilization Rate — 사용률
+- U = 총 대출금 / 총 예치금
+- U = Total Borrows / Total Deposits
+- 높을수록 → 이자율 높아짐 (유동성 복귀 유도)
+- Higher → interest rates increase (incentivizes liquidity return)
+- **스테이킹 비유**: 검증자 큐와 유사 — 수요가 많으면 진입이 어려움
+
+#### Collateral Factor — 담보 인정 비율
+- 자산별로 다름 (ETH: ~80%, USDC: ~85%)
+- Varies by asset (ETH: ~80%, USDC: ~85%)
+- 변동성이 큰 자산 → 낮은 CF
+
+### 왜 과담보인가? / Why Over-Collateralized?
+- 블록체인에는 신원 확인 없음 → 신용점수 불가
+- No identity on blockchain → no credit scores possible
+- 따라서 대출금보다 더 많은 담보를 요구
+- Therefore require more collateral than loan amount
+
+### 풀 기반 아키텍처 / Pool-Based Architecture
+```
+사용자A (예치) → [렌딩 풀] → 사용자B (대출)
+User A (deposit) → [Lending Pool] → User B (borrow)
+```
+
+## 할 일 / TODO
+- [ ] `defi-lending-protocol-guide.md` 섹션 1-3 읽기 / Read Sections 1-3
+- [ ] Finematics 영상 시청 / Watch Finematics video
+- [ ] SpeedRunEthereum 렌딩 챌린지 완료 / Complete SpeedRunEthereum lending challenge
+- [ ] Compound V2 코드 읽기 / Read Compound V2 code

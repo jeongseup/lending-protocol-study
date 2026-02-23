@@ -1,0 +1,21 @@
+# Foundry
+contracts/out/
+contracts/cache/
+
+# Go
+monitoring/vendor/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+*.env.local
+
+# Claude
+.claude/
