@@ -77,17 +77,19 @@ Supply APY = Borrow APR × Utilization × (1 - Reserve Factor)
 
 학습 중 발생한 Q&A와 상세 예제는 별도 파일에 정리:
 
-| 주제 / Topic   | 파일 / File                                                | 내용 / Contents                                                  |
-| -------------- | ---------------------------------------------------------- | ---------------------------------------------------------------- |
-| Health Factor  | [deep-dive/health-factor.md](deep-dive/health-factor.md)   | BTC $100K 예제, LTV별 비교, HF 간편 공식                         |
-| Interest Rates | [deep-dive/interest-rates.md](deep-dive/interest-rates.md) | 이자 계산 예제, RF 프로토콜 비교, 3 Layers, 프로토콜별 모델 비교 |
+| 주제 / Topic   | 파일 / File                                                                    | 내용 / Contents                                                  |
+| -------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| Health Factor  | [deep-dive/health-factor.md](deep-dive/health-factor.md)                       | BTC $100K 예제, LTV별 비교, HF 간편 공식                         |
+| Interest Rates | [deep-dive/interest-rates.md](deep-dive/interest-rates.md)                     | 이자 계산 예제, RF 프로토콜 비교, 3 Layers, 프로토콜별 모델 비교 |
+| Deposit Tokens | [deep-dive/deposit-tokens.md](deep-dive/deposit-tokens.md)                     | cToken vs aToken, Scaled Balance, EVM 가스 비용, Walrus 비교     |
+| Compound V2    | [deep-dive/compound-v2-code-reading.md](deep-dive/compound-v2-code-reading.md) | 핵심 3개 컨트랙트 코드 리딩, 우리 코드와 매핑                    |
 
 ---
 
 ## 할 일 / TODO
 
+- [] [Compound V2 코드](https://github.com/compound-finance/compound-protocol) 읽기 → [코드 리딩 가이드](deep-dive/compound-v2-code-reading.md)
 - [x] [`defi-lending-protocol-guide.md`](../defi-lending-protocol-guide.md) 섹션 1-3 읽기 / Read Sections 1-3
 - [x] [Finematics: DeFi Lending Explained](https://www.youtube.com/watch?v=aTp9er6S73M) 영상 시청
 - [x] [Finematics: Flash Loans Explained](https://www.youtube.com/watch?v=mCJUhnXQ76s) 영상 시청
 - [x] ~~[SpeedRunEthereum 렌딩 챌린지](https://speedrunethereum.com/challenge/over-collateralized-lending)~~ — 이미 LendingPool.sol로 더 완전하게 구현함
-- [ ] [Compound V2 코드](https://github.com/compound-finance/compound-protocol) 읽기
