@@ -64,13 +64,16 @@ LendingProtocolStudy/
 │       └── alert/                      # 알림 로직
 │
 ├── notes/                              # 일별 학습 노트 (한/영 이중 언어)
-│   ├── day1-core-concepts.md          # 핵심 개념 + 예제
+│   ├── day1-core-concepts.md          # 핵심 개념 요약
 │   ├── day2-interest-rates.md         # 이자율 모델 심화
 │   ├── day3-liquidation.md            # 청산 메커니즘
 │   ├── day4-monitoring.md             # 모니터링 & DevOps
 │   ├── day5-security.md               # 보안 & 감사
 │   ├── day6-cross-chain.md            # 크로스체인
-│   └── day7-integration.md            # 통합 프로젝트
+│   ├── day7-integration.md            # 통합 프로젝트
+│   └── deep-dive/                     # Q&A 심화 노트
+│       ├── health-factor.md           # HF 공식, BTC $100K 예제, LTV별 비교
+│       └── interest-rates.md          # 이자 계산, RF 비교, 3 Layers, 모델 비교
 │
 └── defi-lending-protocol-guide.md      # 전체 학습 가이드
 ```
