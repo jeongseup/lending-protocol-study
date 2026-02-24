@@ -51,9 +51,9 @@ contract LiquidationTest is Test {
         oracle.setPriceFeed(address(weth), address(ethFeed));
         oracle.setPriceFeed(address(usdc), address(usdcFeed));
 
-        // 시장 추가 / Add markets
-        pool.addMarket(address(weth), 0.75e18, 0.80e18);
-        pool.addMarket(address(usdc), 0.80e18, 0.85e18);
+        // 리저브 초기화 / Initialize reserves
+        pool.initReserve(address(weth), 0.75e18, 0.80e18);
+        pool.initReserve(address(usdc), 0.80e18, 0.85e18);
 
         // 토큰 배포 / Distribute tokens
         weth.mint(alice, 100e18);
@@ -245,11 +245,6 @@ contract LiquidationTest is Test {
 
         uint256 hfBefore = pool.getHealthFactor(alice);
         assertGe(hfBefore, 1e18, "Should start healthy");
-
-        // 시간이 지나면 이자가 누적되어 HF가 감소할 수 있음
-        // Interest accrual over time may decrease HF
-        // 실제로는 이 테스트에서는 가격 하락을 사용
-        // In practice, we use price drop for this test
 
         // 소폭 가격 하락으로 청산 트리거
         // Small price drop triggers liquidation

@@ -37,8 +37,8 @@ contract DeployScript is Script {
         LendingPool pool = new LendingPool(address(oracle), address(rateModel));
         console.log("LendingPool deployed at:", address(pool));
 
-        // 4. 시장 추가 (테스트넷 토큰 주소 필요)
-        //    Add markets (testnet token addresses needed)
+        // 4. 리저브 초기화 (테스트넷 토큰 주소 필요)
+        //    Initialize reserves (testnet token addresses needed)
         //
         // Sepolia 테스트넷 토큰 예시:
         // Sepolia testnet token examples:
@@ -49,8 +49,8 @@ contract DeployScript is Script {
         // oracle.setPriceFeed(WETH, CHAINLINK_ETH_USD_FEED);
         // oracle.setPriceFeed(USDC, CHAINLINK_USDC_USD_FEED);
         //
-        // pool.addMarket(WETH, 0.75e18, 0.80e18);  // 75% CF, 80% LT
-        // pool.addMarket(USDC, 0.80e18, 0.85e18);  // 80% CF, 85% LT
+        // pool.initReserve(WETH, 0.75e18, 0.80e18);  // 75% CF, 80% LT
+        // pool.initReserve(USDC, 0.80e18, 0.85e18);  // 80% CF, 85% LT
 
         vm.stopBroadcast();
 

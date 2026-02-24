@@ -52,13 +52,11 @@ contract LendingPoolTest is Test {
         oracle.setPriceFeed(address(weth), address(ethFeed));
         oracle.setPriceFeed(address(usdc), address(usdcFeed));
 
-        // 시장 추가 / Add markets
+        // 리저브 초기화 (Aave V3: initReserve) / Initialize reserves
         // ETH: 75% 담보 인정, 80% 청산 기준
-        // ETH: 75% collateral factor, 80% liquidation threshold
-        pool.addMarket(address(weth), 0.75e18, 0.80e18);
+        pool.initReserve(address(weth), 0.75e18, 0.80e18);
         // USDC: 80% 담보 인정, 85% 청산 기준
-        // USDC: 80% collateral factor, 85% liquidation threshold
-        pool.addMarket(address(usdc), 0.80e18, 0.85e18);
+        pool.initReserve(address(usdc), 0.80e18, 0.85e18);
 
         // 토큰 배포 / Distribute tokens
         weth.mint(alice, 100e18);
@@ -99,12 +97,16 @@ contract LendingPoolTest is Test {
         vm.stopPrank();
 
         // LToken 잔액 확인 / Verify LToken balance
-        (LToken lToken,,,,,,,,, ) = pool.markets(address(weth));
+        (LToken lToken,,,,,,,,,,) = pool.reserves(address(weth));
         assertEq(lToken.balanceOf(alice), 10e18, "Should have 10 lWETH");
 
-        // 시장 상태 확인 / Verify market state
-        (,,,,uint256 totalDeposits,,,,, ) = pool.markets(address(weth));
+        // 리저브 상태 확인 / Verify reserve state
+        (,,,,uint256 totalDeposits,,,,,,) = pool.reserves(address(weth));
         assertEq(totalDeposits, 10e18, "Total deposits should be 10 ETH");
+
+        // Aave V3 패턴: 비트맵에 담보 비트가 설정되었는지 확인
+        // Aave V3 pattern: verify collateral bit is set in bitmap
+        assertTrue(pool.isUsingAsCollateral(alice, address(weth)), "Should be using WETH as collateral");
     }
 
     function test_deposit_emitsEvent() public {
@@ -146,6 +148,10 @@ contract LendingPoolTest is Test {
         // Verify health factor (must be >= 1.0)
         uint256 hf = pool.getHealthFactor(alice);
         assertGe(hf, 1e18, "Health factor must be >= 1.0");
+
+        // Aave V3 패턴: 비트맵에 대출 비트가 설정되었는지 확인
+        // Aave V3 pattern: verify borrowing bit is set in bitmap
+        assertTrue(pool.isBorrowing(alice, address(usdc)), "Should be borrowing USDC");
     }
 
     function test_borrow_insufficientCollateralReverts() public {
@@ -186,8 +192,12 @@ contract LendingPoolTest is Test {
         vm.stopPrank();
 
         // 부채 토큰 잔액 0 확인 / Verify debt token balance is 0
-        (, DebtToken debtToken,,,,,,,,) = pool.markets(address(usdc));
+        (, DebtToken debtToken,,,,,,,,,) = pool.reserves(address(usdc));
         assertEq(debtToken.balanceOf(alice), 0, "Debt should be fully repaid");
+
+        // Aave V3 패턴: 전액 상환 시 대출 비트가 해제되었는지 확인
+        // Aave V3 pattern: verify borrowing bit is unset after full repay
+        assertFalse(pool.isBorrowing(alice, address(usdc)), "Should not be borrowing USDC after full repay");
     }
 
     function test_repay_partial() public {
@@ -200,8 +210,12 @@ contract LendingPoolTest is Test {
         pool.repay(address(usdc), 2_500e18);
         vm.stopPrank();
 
-        (, DebtToken debtToken,,,,,,,,) = pool.markets(address(usdc));
+        (, DebtToken debtToken,,,,,,,,,) = pool.reserves(address(usdc));
         assertEq(debtToken.balanceOf(alice), 2_500e18, "Half debt should remain");
+
+        // 부분 상환 시 대출 비트는 여전히 설정되어 있어야 함
+        // Borrowing bit should still be set after partial repay
+        assertTrue(pool.isBorrowing(alice, address(usdc)), "Should still be borrowing USDC after partial repay");
     }
 
     // ============================================================
@@ -216,9 +230,13 @@ contract LendingPoolTest is Test {
         pool.withdraw(address(weth), 10e18);
         vm.stopPrank();
 
-        (LToken lToken,,,,,,,,, ) = pool.markets(address(weth));
+        (LToken lToken,,,,,,,,,,) = pool.reserves(address(weth));
         assertEq(lToken.balanceOf(alice), 0, "LToken balance should be 0");
         assertEq(weth.balanceOf(alice), 100e18, "Should have original WETH back");
+
+        // Aave V3 패턴: 전액 출금 시 담보 비트가 해제되었는지 확인
+        // Aave V3 pattern: verify collateral bit is unset after full withdrawal
+        assertFalse(pool.isUsingAsCollateral(alice, address(weth)), "Should not be using WETH as collateral after full withdrawal");
     }
 
     function test_withdraw_wouldUndercollateralizeReverts() public {
@@ -249,7 +267,7 @@ contract LendingPoolTest is Test {
         vm.warp(block.timestamp + 365 days);
 
         // 상환 시 이자가 반영됨 / Interest reflected on repay
-        (,,,,, uint256 totalBorrowsBefore,,,,) = pool.markets(address(usdc));
+        (,,,,,uint256 totalBorrowsBefore,,,,,) = pool.reserves(address(usdc));
 
         // 상호작용을 통해 이자 갱신 트리거
         // Trigger interest update through interaction
@@ -257,7 +275,7 @@ contract LendingPoolTest is Test {
         pool.repay(address(usdc), 1); // 최소 상환으로 이자 갱신 / Minimal repay to trigger interest
         vm.stopPrank();
 
-        (,,,,, uint256 totalBorrowsAfter,,,,) = pool.markets(address(usdc));
+        (,,,,,uint256 totalBorrowsAfter,,,,,) = pool.reserves(address(usdc));
 
         // 총 대출금이 증가했어야 함 (이자 누적)
         // Total borrows should have increased (interest accrued)
@@ -295,11 +313,15 @@ contract LendingPoolTest is Test {
         vm.stopPrank();
 
         // 최종 확인 / Final verification
-        (LToken lToken,,,,,,,,, ) = pool.markets(address(weth));
+        (LToken lToken,,,,,,,,,,) = pool.reserves(address(weth));
         assertEq(lToken.balanceOf(alice), 0, "No lTokens remaining");
 
         uint256 hf = pool.getHealthFactor(alice);
         assertEq(hf, type(uint256).max, "HF should be max (no debt)");
+
+        // Aave V3 패턴: 전체 수명주기 후 비트맵이 깨끗해야 함
+        // Aave V3 pattern: bitmap should be clean after full lifecycle
+        assertEq(pool.getUserConfiguration(alice), 0, "User config should be empty after full lifecycle");
     }
 
     // ============================================================
@@ -327,5 +349,34 @@ contract LendingPoolTest is Test {
 
         uint256 hf = pool.getHealthFactor(alice);
         assertEq(hf, 1.6e18, "Health factor should be 1.6");
+    }
+
+    // ============================================================
+    // UserConfigurationMap 비트맵 테스트 / Bitmap Tests
+    // ============================================================
+
+    function test_userConfig_bitmapTracking() public {
+        // 비트맵이 올바르게 추적되는지 검증
+        // Verify bitmap tracks correctly
+
+        // 초기 상태: 비트맵 비어있음
+        assertEq(pool.getUserConfiguration(alice), 0, "Config should be empty initially");
+
+        // Alice가 WETH 예치 → 담보 비트 설정
+        vm.startPrank(alice);
+        pool.deposit(address(weth), 10e18);
+        assertTrue(pool.isUsingAsCollateral(alice, address(weth)), "WETH collateral bit should be set");
+        assertFalse(pool.isBorrowing(alice, address(weth)), "WETH borrow bit should not be set");
+
+        // Alice가 USDC 대출 → 대출 비트 설정
+        pool.borrow(address(usdc), 5_000e18);
+        assertTrue(pool.isBorrowing(alice, address(usdc)), "USDC borrow bit should be set");
+
+        // 비트맵 값 확인: WETH(id=0) 담보 = bit 0, USDC(id=1) 대출 = bit 3
+        // Bitmap: WETH collateral at bit 0, USDC borrow at bit 3
+        uint256 config = pool.getUserConfiguration(alice);
+        assertEq(config & 1, 1, "Bit 0 (WETH collateral) should be set");
+        assertEq((config >> 3) & 1, 1, "Bit 3 (USDC borrow) should be set");
+        vm.stopPrank();
     }
 }

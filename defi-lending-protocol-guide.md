@@ -100,7 +100,7 @@ On-chain lending lacks identity verification, so:
 2020.01  Aave V1 mainnet ⭐
            └─ Flash Loans (world first!)
            └─ aTokens (1:1 pegged deposit receipts)
-           └─ Variable + Stable rate options
+           └─ Variable + Stable rate options (Note: Stable rate removed in V3.2+)
 
 2020.03  Black Thursday
            └─ ETH -30% crash
@@ -143,6 +143,12 @@ On-chain lending lacks identity verification, so:
            └─ Portal (cross-chain liquidity)
            └─ Supply/Borrow Caps
            └─ Multi-chain native design
+
+2024     Aave V3.2~3.4 (aave-v3-origin)
+           └─ Stable Rate completely removed (Variable only)
+           └─ Bad Debt (Deficit) system added
+           └─ InterestRateStrategy consolidated to Pool-level
+           └─ Position Manager, E-Mode bitmap, Liquidation Grace Period
 
 2022     Euler Finance launch
            └─ Innovative liquidation mechanism
@@ -300,11 +306,11 @@ exchangeRate = (totalCash + totalBorrows - totalReserves) / totalSupply
 // Variable debt tokens (vTokens)
 // Balance increases as interest accrues
 variableDebt = principal * (currentIndex / userIndex)
-
-// Stable debt tokens (sTokens)  
-// Fixed rate at borrow time
-stableDebt = principal * (1 + stableRate)^timePassed
 ```
+
+> **Note:** Stable debt tokens (sTokens) existed in Aave V1-V3.1 but were **removed in V3.2+** (aave-v3-origin).
+> Stable rate was rarely used in practice (<1% of borrows), and its complexity added attack surface.
+> Current Aave V3 only supports Variable rate borrowing.
 
 ### 4.3 Health Factor Calculation
 
@@ -397,17 +403,19 @@ function getBorrowRate(uint256 utilization) public view returns (uint256) {
 
 ### 5.3 Aave's Interest Rate Strategy
 
-```solidity
-// Variable rate: Changes with utilization
-// Stable rate: Fixed at borrow time (premium over variable)
+> **Note:** Stable rate was removed in Aave V3.2+. Only Variable rate remains.
+> The interest rate strategy contract was also consolidated: per-reserve strategy addresses
+> were replaced by a single Pool-level immutable `RESERVE_INTEREST_RATE_STRATEGY`
+> (`DefaultReserveInterestRateStrategyV2`), with per-reserve parameters still configurable.
 
-// Variable Rate Calculation
+```solidity
+// Variable Rate Calculation (V3.4 — only rate mode remaining)
 if (utilization < OPTIMAL_UTILIZATION) {
-    variableRate = baseVariableRate + 
+    variableRate = baseVariableRate +
                    (utilization / OPTIMAL_UTILIZATION) * variableRateSlope1;
 } else {
-    variableRate = baseVariableRate + variableRateSlope1 + 
-                   ((utilization - OPTIMAL_UTILIZATION) / 
+    variableRate = baseVariableRate + variableRateSlope1 +
+                   ((utilization - OPTIMAL_UTILIZATION) /
                     (1 - OPTIMAL_UTILIZATION)) * variableRateSlope2;
 }
 ```
@@ -768,7 +776,8 @@ POST-DEPLOYMENT:
 |----------|---------|------------|
 | **Aave** | V1 (Legacy) | [github.com/aave/aave-protocol](https://github.com/aave/aave-protocol) |
 | **Aave** | V2 | [github.com/aave/protocol-v2](https://github.com/aave/protocol-v2) |
-| **Aave** | V3 | [github.com/aave/aave-v3-core](https://github.com/aave/aave-v3-core) |
+| **Aave** | V3 (deprecated) | [github.com/aave/aave-v3-core](https://github.com/aave/aave-v3-core) |
+| **Aave** | V3 Origin (latest) | [github.com/aave-dao/aave-v3-origin](https://github.com/aave-dao/aave-v3-origin) |
 | **Compound** | V2 | [github.com/compound-finance/compound-protocol](https://github.com/compound-finance/compound-protocol) |
 | **Compound** | III | [github.com/compound-finance/comet](https://github.com/compound-finance/comet) |
 | **MakerDAO** | DSS | [github.com/makerdao/dss](https://github.com/makerdao/dss) |
@@ -877,7 +886,7 @@ POST-DEPLOYMENT:
 | **CDP** | Collateralized Debt Position - locked collateral backing debt |
 | **cToken** | Compound's interest-bearing deposit token |
 | **aToken** | Aave's rebasing deposit token |
-| **vToken** | Aave's variable debt token |
+| **vToken** | Aave's variable debt token (only debt token type since V3.2+) |
 | **Flash Loan** | Uncollateralized loan repaid within same transaction |
 | **Health Factor** | Collateral value / Debt value ratio |
 | **Liquidation** | Forced closure of undercollateralized position |
@@ -889,5 +898,5 @@ POST-DEPLOYMENT:
 
 ---
 
-*Last updated: 2026-02-23*
+*Last updated: 2026-02-24*
 *Created for DeFi Lending Protocol Engineering study*

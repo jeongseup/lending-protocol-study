@@ -8,26 +8,113 @@
 
 ## 아키텍처 개요 / Architecture Overview
 
+### 3개 컨트랙트의 역할
+
 ```
-사용자 호출 흐름 / User Call Flow:
+CToken          = 실행자 (돈 이동, 이자 계산)
+Comptroller     = 문지기 (허가/거부, HF 계산, 오라클 가격 조회)
+InterestRateModel = 계산기 (이자율)
+```
 
-  User → CToken.mint()      → Comptroller.mintAllowed()      ✓ → cToken 발행
-  User → CToken.borrow()    → Comptroller.borrowAllowed()    ✓ → 돈 전송
-  User → CToken.redeem()    → Comptroller.redeemAllowed()    ✓ → 원금+이자 회수
-  User → CToken.repayBorrow() → Comptroller.repayBorrowAllowed() ✓ → 부채 상환
-  User → CToken.liquidate() → Comptroller.liquidateBorrowAllowed() ✓ → 담보 청산
+### 사용자 호출 흐름
 
-  CToken = 실행자 (돈 이동)
-  Comptroller = 문지기 (허가/거부)
-  InterestRateModel = 계산기 (이자율)
+```
+User → CToken.mint()        → Comptroller.mintAllowed()            ✓ → cToken 발행
+User → CToken.borrow()      → Comptroller.borrowAllowed()         ✓ → 돈 전송
+User → CToken.redeem()      → Comptroller.redeemAllowed()         ✓ → 원금+이자 회수
+User → CToken.repayBorrow() → Comptroller.repayBorrowAllowed()    ✓ → 부채 상환
+User → CToken.liquidate()   → Comptroller.liquidateBorrowAllowed() ✓ → 담보 청산
+```
+
+### CToken 상속 구조
+
+```
+CToken은 abstract contract. 실제 배포되는 건 CErc20과 CEther.
+
+  CTokenInterface (abstract)  ← 인터페이스 + 스토리지
+        ↓
+  CToken (abstract)           ← 핵심 로직 (mint/borrow/accrueInterest)
+        ↓                       getCashPrior()는 virtual로 선언만
+        ├── CErc20 (concrete) ← ERC20 토큰 시장 (cUSDC, cDAI, cWBTC 등)
+        └── CEther (concrete) ← ETH 시장 (cETH)
+
+getCashPrior()가 abstract인 이유:
+  CErc20: return EIP20Interface(underlying).balanceOf(address(this))
+          → ERC20 토큰 잔고 조회
+  CEther: return address(this).balance - msg.value
+          → ETH 잔고에서 이번 tx 금액 제외 (이미 들어왔으니까)
+  → 자산 타입에 따라 "풀의 현금"을 가져오는 방식이 다르므로 각각 override
+```
+
+### 배포 구조 — 토큰별 CToken + Comptroller 1개
+
+```
+Compound V2는 토큰별로 CToken을 각각 배포한다. Comptroller가 전체를 묶는 역할.
+
+4개 자산을 지원하는 경우:
+  ① CErc20 배포 → cUSDC (USDC 시장)
+  ② CErc20 배포 → cDAI  (DAI 시장)
+  ③ CErc20 배포 → cWBTC (WBTC 시장)
+  ④ CEther 배포 → cETH  (ETH 시장)
+  ⑤ Comptroller 배포 → 전체 묶어주는 문지기 (1개)
+
+  총 5개 컨트랙트 배포. 실제 메인넷에서는 ~20개 CToken이 배포됨.
+
+  cUSDC ──┐
+  cDAI  ──┤
+  cWBTC ──┼──→ Comptroller (1개)
+  cETH  ──┤      ├── 시장 등록/관리
+          ┘      ├── 담보/대출 허가 (borrowAllowed)
+                  ├── HF 계산 (모든 시장을 순회!)
+                  └── 청산 허가
+```
+
+### 크로스 마켓 흐름 — ETH 담보로 USDC 대출
+
+```
+사용자가 ETH 담보로 USDC를 빌리는 전체 흐름:
+
+  1. User → cETH.mint{value: 1 ETH}()       ← cETH 컨트랙트 호출
+  2. User → Comptroller.enterMarkets([cETH]) ← "cETH를 담보로 쓸게"
+  3. User → cUSDC.borrow(1000e6)             ← cUSDC 컨트랙트 호출
+     → cUSDC가 Comptroller.borrowAllowed() 호출
+     → Comptroller가 모든 시장 순회하며 HF 계산
+     → 통과하면 USDC 전송
+```
+
+### Compound V2 vs Aave V3 / 우리 프로젝트
+
+```
+┌──────────────┬─────────────────────────┬───────────────────────────┐
+│              │ Compound V2             │ Aave V3 / 우리 프로젝트     │
+├──────────────┼─────────────────────────┼───────────────────────────┤
+│ 배포 구조     │ 토큰별 CToken 각각 배포  │ Pool 1개 + 토큰 N개        │
+│              │ + Comptroller 1개       │                           │
+├──────────────┼─────────────────────────┼───────────────────────────┤
+│ 사용자 호출   │ 서로 다른 컨트랙트 각각   │ 같은 Pool 컨트랙트         │
+├──────────────┼─────────────────────────┼───────────────────────────┤
+│ 새 자산 추가  │ 새 CToken 배포 필요      │ Pool에 설정 추가만         │
+├──────────────┼─────────────────────────┼───────────────────────────┤
+│ 장점         │ 자산 간 격리 (하나 터져도 │ UX 간단, 가스비 절약       │
+│              │ 다른 시장에 영향 적음)    │ (크로스콜 없음)             │
+├──────────────┼─────────────────────────┼───────────────────────────┤
+│ 단점         │ 가스비 높음, UX 복잡     │ 하나 터지면 전체 풀 위험    │
+│              │                        │ (Isolation Mode로 완화)    │
+└──────────────┴─────────────────────────┴───────────────────────────┘
+
+Compound V3 (Comet): V2 문제를 인식, Aave처럼 단일 컨트랙트로 전환
+→ 업계가 단일 풀 구조로 수렴하는 추세
 ```
 
 ---
 
 ## ① CToken.sol — 핵심 실행 로직
 
-> GitHub: `contracts/CToken.sol`
+> GitHub: [`contracts/CToken.sol`](https://github.com/compound-finance/compound-protocol/blob/master/contracts/CToken.sol)
 > 우리 프로젝트의 `LendingPool.sol` + `LToken.sol`에 해당
+>
+> abstract contract — 실제 배포는 CErc20(ERC20 시장) 또는 CEther(ETH 시장)
+> getCashPrior() 등 자산 타입별로 다른 함수만 concrete에서 override
 
 ### accrueInterest() — 이자 누적 (제일 중요!)
 
@@ -212,7 +299,7 @@ function liquidateBorrowFresh(
 
 ## ② Comptroller.sol — 문지기 (리스크 관리)
 
-> GitHub: `contracts/Comptroller.sol`
+> GitHub: [`contracts/Comptroller.sol`](https://github.com/compound-finance/compound-protocol/blob/master/contracts/Comptroller.sol)
 > 우리 프로젝트에서는 `LendingPool.sol` 안에 통합됨
 
 ### 핵심 함수 1개만 이해하면 됨
@@ -323,11 +410,48 @@ function liquidateBorrowAllowed(
 }
 ```
 
+### 오라클 아키텍처 — 가격 조회는 Comptroller만 한다
+
+```
+CToken 안에는 가격 조회 코드가 없다. 가격은 Comptroller만 사용한다.
+
+  CToken ←→ Comptroller ←→ PriceOracle (별도 컨트랙트)
+                               ↑
+                     Chainlink Aggregator 등 외부 피드
+
+오라클 호출 위치 (Comptroller.sol 안에서만):
+  borrowAllowed():
+    oracle.getUnderlyingPrice(CToken(cToken))          ← 대출 시 가격 조회
+  getHypotheticalAccountLiquidityInternal():
+    vars.oraclePriceMantissa = oracle.getUnderlyingPrice(asset)  ← HF 계산
+  liquidateBorrowAllowed():
+    getAccountLiquidityInternal() 안에서 가격 조회      ← 청산 시
+```
+
+> GitHub: [`contracts/SimplePriceOracle.sol`](https://github.com/compound-finance/compound-protocol/blob/master/contracts/SimplePriceOracle.sol)
+
+### 청산 실행 — 프로토콜은 "수동적", 봇이 "능동적"
+
+```
+프로토콜이 자동으로 청산하는 게 아니다. 외부 봇에게 인센티브(보너스)를 줘서 유인.
+
+  ① 오라클이 가격 업데이트 (Chainlink keeper 등)
+  ② 청산 봇이 getAccountLiquidity()를 주기적으로 호출
+     → Comptroller가 oracle.getUnderlyingPrice()로 최신 가격 조회
+     → shortfall > 0 인 사용자 발견
+  ③ 봇이 cToken.liquidateBorrow() 호출
+  ④ cToken → Comptroller.liquidateBorrowAllowed() → 오라클 가격으로 HF 확인
+  ⑤ 청산 실행, 봇은 8% 보너스 획득
+
+  → 봇 인프라 운영이 DevOps 엔지니어의 업무 중 하나
+  → 우리 프로젝트의 monitoring/cmd/monitor/ 가 이 봇 역할
+```
+
 ---
 
 ## ③ JumpRateModelV2.sol — 이자율 모델
 
-> GitHub: `contracts/BaseJumpRateModelV2.sol`
+> GitHub: [`contracts/BaseJumpRateModelV2.sol`](https://github.com/compound-finance/compound-protocol/blob/master/contracts/BaseJumpRateModelV2.sol)
 > 우리 프로젝트의 `JumpRateModel.sol`과 동일
 
 ```solidity
@@ -417,6 +541,129 @@ function getSupplyRate(uint cash, uint borrows, uint reserves, uint reserveFacto
 
 ---
 
+## "Fresh" 패턴 — 왜 함수 이름에 Fresh가 붙는가?
+
+```
+Compound의 함수 호출 체인:
+
+  mint()  → mintInternal()  → mintFresh()
+               ↑
+         accrueInterest() 호출!
+
+  1. mint()           ← 사용자가 호출 (external)
+  2. mintInternal()   ← 여기서 accrueInterest() 먼저 실행
+  3. mintFresh()      ← "이자가 최신(fresh) 상태"에서 실행
+
+"Fresh" = "accrueInterest()가 방금 실행되어 이자가 최신인 상태"
+```
+
+```
+mintFresh() 첫 줄:
+  if (accrualBlockNumber != getBlockNumber()) {
+      revert MintFreshnessCheck();  ← "신선하지 않으면 거부!"
+  }
+
+  → accrueInterest()가 이번 블록에서 실행되었는지 확인
+  → 안 됐으면 revert
+
+왜? exchangeRate, borrowIndex, totalBorrows가 전부 이자에 의존하니까
+    stale(오래된) 데이터로 계산하면 교환비율이 틀어짐
+
+  Fresh = "오늘 이자 정산 완료된 통장"   → 거래 가능
+  Stale = "어제까지만 이자 반영된 통장"   → 거래 불가!
+
+  오라클 때문이 아니라, "이자 누적"이 최신인지 확인하는 것.
+```
+
+```
+모든 핵심 함수가 이 패턴:
+  mintFresh()          — Freshness 체크 후 예치 실행
+  redeemFresh()        — Freshness 체크 후 인출 실행
+  borrowFresh()        — Freshness 체크 후 대출 실행
+  repayBorrowFresh()   — Freshness 체크 후 상환 실행
+  liquidateBorrowFresh() — Freshness 체크 후 청산 실행
+
+→ 모두 "이자 최신화 → 검증 → 실행"의 3단계 구조
+```
+
+---
+
+## Mantissa — Solidity에서 소수점을 다루는 방법
+
+```
+문제: Solidity는 소수점(float/double)을 지원하지 않음
+     0.05 (5%) 같은 값을 어떻게 저장하나?
+
+해결: 10^18을 곱해서 정수로 저장 = "Mantissa"
+
+  5% = 0.05 → 0.05 × 10^18 = 50,000,000,000,000,000 (50 quadrillion)
+  100% = 1.0 → 1.0 × 10^18 = 1,000,000,000,000,000,000
+
+  1 Mantissa unit = 1 × 10^18 (ETH의 Wei 단위와 동일한 스케일)
+```
+
+```
+Compound 코드에서 실제로 보이는 것:
+
+  // CTokenInterfaces.sol
+  uint internal constant borrowRateMaxMantissa = 0.0005e16;
+  uint internal constant reserveFactorMaxMantissa = 1e18;  // = 100%
+
+  // Comptroller.sol
+  uint public closeFactorMantissa;  // 0.5e18 = 50% (Close Factor)
+
+  // exchangeRate도 Mantissa
+  initialExchangeRateMantissa = 0.02e18;  // 1 underlying = 50 cToken
+```
+
+```
+연산 규칙:
+
+  일반 곱셈: result = a × b / 1e18
+    → Mantissa끼리 곱하면 스케일이 두 배가 되니까 1e18로 나눠야 함
+    → 예: 50% × 80% = 0.5e18 × 0.8e18 / 1e18 = 0.4e18 = 40%
+
+  Compound의 Exp 구조체:
+    struct Exp { uint mantissa; }
+    function mul_(Exp a, Exp b) → a.mantissa × b.mantissa / 1e18
+    function div_(uint a, Exp b) → a × 1e18 / b.mantissa
+```
+
+```
+블록당 이자율 → 연이율 변환:
+
+  코드에서 보이는 borrowRate = 블록당 이자율 (Mantissa)
+  연이율로 바꾸려면: APR = borrowRate × blocksPerYear / 1e18
+
+  예: borrowRateMantissa = 23,782,343,987 (블록당)
+      blocksPerYear ≈ 2,102,400 (ETH ~15초/블록)
+      APR = 23,782,343,987 × 2,102,400 / 1e18 ≈ 5% 연이율
+
+  봇/대시보드 개발 시 주의:
+    항상 Mantissa를 10^18로 나눠야 실제 소수점 값!
+    안 나누면 5%가 50,000,000,000,000,000으로 보임
+```
+
+```
+정밀도 관련 주의사항:
+
+  ① 반올림 오차: 정수 나눗셈이라 미세한 오차 발생
+     하지만 10^18 정밀도면 대부분 무시 가능
+     (Wei 단위에서 1 차이 = $0.000000000000000001)
+
+  ② 정수 오버플로우:
+     Solidity 0.8+: 자동 overflow 체크 (revert)
+     Solidity 0.7 이하: unchecked → 과거 많은 해킹의 원인
+     Compound의 Mantissa 곱셈이 오버플로우되면 잘못된 이자 계산 → 자금 탈취 가능
+
+  ③ Aave의 Ray:
+     Compound: 10^18 (Mantissa)
+     Aave:     10^27 (Ray) — 더 높은 정밀도
+     우리 프로젝트: 10^18 (Compound 스타일)
+```
+
+---
+
 ## 읽는 순서 (30분이면 충분)
 
 ```
@@ -434,4 +681,79 @@ function getSupplyRate(uint cash, uint borrows, uint reserves, uint reserveFacto
 
 5. BaseJumpRateModelV2.sol → 전체 읽기 (5분)
    → 우리가 이미 구현한 것과 동일한지 확인
+```
+
+---
+
+## initialExchangeRateMantissa — 0.02는 어디서 나온 값인가?
+
+```
+Q: initialExchangeRateMantissa = 0.02e18 (1 ETH = 50 cETH)
+   이 비율은 어떻게 정해지는가?
+
+A: Compound 팀의 UX 선택. 수학적 근거 없음. 생성자 파라미터로 전달.
+```
+
+### 1. 코드에서의 초기화
+
+```solidity
+// CToken.sol — initialize()
+function initialize(
+    ComptrollerInterface comptroller_,
+    InterestRateModel interestRateModel_,
+    uint initialExchangeRateMantissa_,  // ← 여기서 받음
+    string memory name_,
+    string memory symbol_,
+    uint8 decimals_
+) internal {
+    require(initialExchangeRateMantissa_ > 0, "initial exchange rate must be > 0");
+    initialExchangeRateMantissa = initialExchangeRateMantissa_;
+}
+```
+
+```
+배포 스크립트에서 0.02e18을 하드코딩해서 넘긴다.
+모든 cToken (cUSDC, cDAI, cETH, cWBTC 등)이 동일하게 0.02e18 사용.
+```
+
+### 2. 왜 0.02인가?
+
+```
+UX를 위한 선택:
+  exchangeRate = 0.02 → 1 underlying = 50 cTokens
+
+  사용자가 1 ETH 예치 → 50 cETH 수령
+  사용자가 100 USDC 예치 → 5,000 cUSDC 수령
+
+  → cToken 숫자가 크게 보임 → 심리적으로 "많이 받은 느낌"
+  → 소수점 이하 정밀도도 확보 (작은 금액도 cToken으로 표현 가능)
+
+만약 반대로 initialExchangeRate = 50 이었다면:
+  1 ETH → 0.02 cETH  ← 숫자가 너무 작음, 정밀도 손실 우려
+```
+
+### 3. 이 값은 프로토콜 동작에 영향 있는가?
+
+```
+없다. 시작점일 뿐이고, 이후 이자가 쌓이면서 exchangeRate가 계속 올라간다.
+
+  배포 직후:   exchangeRate = 0.020000  (1 ETH = 50.00 cETH)
+  1년 후:     exchangeRate = 0.020500  (1 ETH ≈ 48.78 cETH)
+  5년 후:     exchangeRate = 0.025000  (1 ETH = 40.00 cETH)
+
+  → 시작값이 0.02든 0.01이든, 상대적 증가율은 동일
+  → 예금자 수익에 영향 없음
+  → 유일한 요구사항: 0보다 크기만 하면 됨
+```
+
+### 4. 다른 프로토콜은 어떤 값을 쓰는가?
+
+```
+Compound V2:  0.02e18      (모든 cToken 동일, = 1:50)
+Compound V3:  exchangeRate 개념 자체를 없앰 (Comet은 다른 구조)
+Aave:         liquidityIndex = 1e27 (Ray) 에서 시작 (= 1:1)
+ERC-4626:     보통 1:1에서 시작 (1 share = 1 asset)
+
+→ Compound만 1:50으로 시작하는 독특한 선택
+→ 나머지 프로토콜은 1:1이 표준
 ```

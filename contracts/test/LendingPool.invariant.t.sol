@@ -162,9 +162,9 @@ contract LendingPoolInvariantTest is Test {
         oracle.setPriceFeed(address(weth), address(ethFeed));
         oracle.setPriceFeed(address(usdc), address(usdcFeed));
 
-        // 시장 추가 / Add markets
-        pool.addMarket(address(weth), 0.75e18, 0.80e18);  // 75% CF, 80% LT
-        pool.addMarket(address(usdc), 0.80e18, 0.85e18);  // 80% CF, 85% LT
+        // 리저브 초기화 / Initialize reserves
+        pool.initReserve(address(weth), 0.75e18, 0.80e18);  // 75% CF, 80% LT
+        pool.initReserve(address(usdc), 0.80e18, 0.85e18);  // 80% CF, 85% LT
 
         // 풀에 초기 유동성 공급 / Provide initial liquidity
         usdc.mint(address(this), 1_000_000e6);
@@ -179,8 +179,8 @@ contract LendingPoolInvariantTest is Test {
     /// @notice 불변성: 총 예치금은 항상 총 대출금 이상이어야 함
     /// @notice Invariant: total deposits must always >= total borrows
     function invariant_totalDepositsGteTotalBorrows() public view {
-        (,,,,uint256 wethDeposits, uint256 wethBorrows,,,,) = pool.markets(address(weth));
-        (,,,,uint256 usdcDeposits, uint256 usdcBorrows,,,,) = pool.markets(address(usdc));
+        (,,,,uint256 wethDeposits, uint256 wethBorrows,,,,,) = pool.reserves(address(weth));
+        (,,,,uint256 usdcDeposits, uint256 usdcBorrows,,,,,) = pool.reserves(address(usdc));
 
         assertGe(
             wethDeposits,
@@ -197,8 +197,8 @@ contract LendingPoolInvariantTest is Test {
     /// @notice 불변성: 대출 인덱스는 항상 1.0(1e18) 이상이어야 함
     /// @notice Invariant: borrow index must always be >= 1.0 (1e18)
     function invariant_borrowIndexGteOne() public view {
-        (,,,,,,,uint256 wethIndex,,) = pool.markets(address(weth));
-        (,,,,,,,uint256 usdcIndex,,) = pool.markets(address(usdc));
+        (,,,,,,,uint256 wethIndex,,,) = pool.reserves(address(weth));
+        (,,,,,,,uint256 usdcIndex,,,) = pool.reserves(address(usdc));
 
         assertGe(wethIndex, 1e18, "WETH borrow index must be >= 1e18");
         assertGe(usdcIndex, 1e18, "USDC borrow index must be >= 1e18");
