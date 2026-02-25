@@ -43,7 +43,7 @@ pragma solidity ^0.8.20;
 ///
 ///      Q: 왜 인터페이스를 직접 정의하는가?
 ///      A: Chainlink 전체 패키지를 의존성에 추가하지 않기 위해.
-///         실제 프로덕션에서는 @chainlink/contracts를 import하기도 함.
+///         실제 프로덕션에서는 chainlink/contracts를 import하기도 함.
 interface IPriceFeed {
     /// @notice 최신 가격 데이터를 조회
     /// @dev Chainlink 노드들이 합의한 최신 가격
@@ -55,13 +55,7 @@ interface IPriceFeed {
     function latestRoundData()
         external
         view
-        returns (
-            uint80 roundId,
-            int256 answer,
-            uint256 startedAt,
-            uint256 updatedAt,
-            uint80 answeredInRound
-        );
+        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
 
     /// @notice 이 피드의 소수점 자릿수
     /// @dev 대부분의 USD 피드는 8 decimals (예: ETH = 2000_00000000)
@@ -111,6 +105,8 @@ contract PriceOracle {
     /// @param _maxStaleness 최대 허용 지연 시간 (초). 예: 3600 = 1시간
     constructor(uint256 _maxStaleness) {
         // TODO: owner를 배포자(msg.sender)로, maxStaleness를 설정하세요.
+        owner = msg.sender;
+        maxStaleness = _maxStaleness;
     }
 
     // ──────────────────────────────────────
@@ -129,6 +125,10 @@ contract PriceOracle {
     function setPriceFeed(address asset, address feed) external onlyOwner {
         // TODO: 구현하세요.
         // 힌트: require로 address(0) 체크, mapping에 저장, 이벤트 발생
+        require(asset != address(0), "Invalid asset");
+        require(feed != address(0), "Invalid feed");
+        priceFeeds[asset] = feed;
+        emit PriceFeedSet(asset, feed);
     }
 
     // ──────────────────────────────────────
@@ -159,12 +159,22 @@ contract PriceOracle {
         // TODO: 구현하세요.
         // 순서:
         // 1. priceFeeds에서 피드 주소 가져오기 (없으면 revert)
+        address feed = priceFeeds[asset];
+        require(feed != address(0), "No price feed");
         // 2. IPriceFeed(feed).latestRoundData() 호출
+        (uint256 roundId, int256 answer,, uint256 updatedAt, uint256 answeredInRound) =
+            IPriceFeed(feed).latestRoundData();
+
         // 3. answer > 0 체크
+        require(answer > 0, "Invalid price");
         // 4. updatedAt > 0 체크
+        require(updatedAt > 0, "Invalid updatedAt");
         // 5. answeredInRound >= roundId 체크
+        require(answeredInRound >= roundId, "Invalid answeredInRound");
         // 6. block.timestamp - updatedAt <= maxStaleness 체크
+        require(block.timestamp - updatedAt <= maxStaleness, "Oracle data is stale");
         // 7. uint256(answer) 리턴
+        return uint256(answer);
     }
 
     // ──────────────────────────────────────
@@ -191,6 +201,18 @@ contract PriceOracle {
     function getAssetPriceNormalized(address asset) external view returns (uint256) {
         // TODO: 구현하세요.
         // 힌트: getAssetPrice()로 가격, IPriceFeed.decimals()로 자릿수 확인 후 스케일링
+        address feed = priceFeeds[asset];
+        require(feed != address(0), "No price feed");
+
+        uint256 price = getAssetPrice(asset);
+        uint8 feedDecimals = IPriceFeed(feed).decimals();
+
+        if (feedDecimals < 18) {
+            return price * 10 ** (18 - feedDecimals);
+        } else if (feedDecimals > 18) {
+            return price / 10 ** (feedDecimals - 18);
+        }
+        return price;
     }
 
     // ──────────────────────────────────────
@@ -214,5 +236,11 @@ contract PriceOracle {
         // TODO: 구현하세요.
         // 힌트: latestRoundData()에서 updatedAt만 필요,
         //       block.timestamp - updatedAt로 경과 시간 계산
+        address feed = priceFeeds[asset];
+        require(feed != address(0), "No price feed");
+
+        (,,, uint256 updatedAt,) = IPriceFeed(feed).latestRoundData();
+        staleness = block.timestamp - updatedAt;
+        isStale = staleness > maxStaleness;
     }
 }

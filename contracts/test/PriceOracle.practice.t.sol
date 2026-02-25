@@ -210,7 +210,7 @@ contract PriceOraclePracticeTest is Test {
     function test_staleRound_reverts() public {
         // answeredInRound(3) < roundId(5) → 이전 라운드 답변
         ethFeed.setInvalidRound(5, 3);
-        vm.expectRevert("Stale round");
+        vm.expectRevert("Invalid answeredInRound");
         oracle.getAssetPrice(WETH);
     }
 
