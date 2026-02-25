@@ -397,6 +397,247 @@ Fixed-rate (Yield):
 
 ---
 
+## 4. P2P Matching: Morpho
+
+### 구조 / Architecture
+
+```
+               예치자 (Lender)                    차입자 (Borrower)
+                   │                                  │
+                   │ deposit                           │ borrow
+                   ▼                                  ▼
+             ┌──────────────────────────────────────────┐
+             │           Morpho Optimizer               │
+             │                                          │
+             │  1순위: P2P 직접 매칭                      │
+             │  ┌─────────┐     ┌─────────┐             │
+             │  │ Lender A│────▶│Borrower X│ P2P rate   │
+             │  └─────────┘     └─────────┘  (중간 금리) │
+             │                                          │
+             │  2순위: 매칭 안 되면 → 기존 풀로 전달       │
+             │  ┌─────────────────────────┐             │
+             │  │ Aave / Compound Pool    │             │
+             │  │ (fallback)              │             │
+             │  └─────────────────────────┘             │
+             └──────────────────────────────────────────┘
+
+핵심: 예치자와 차입자를 직접 연결 → 중간 스프레드 제거
+  Pool supply rate: 3%  ←─┐
+  P2P rate:         5%     │ 스프레드 절약
+  Pool borrow rate: 7%  ←─┘
+```
+
+### Morpho Blue — 진화: 단일 컨트랙트 + Permissionless Markets
+
+```
+                사용자 (User)
+                    │
+                    │ supply / borrow
+                    ▼
+            ┌───────────────────┐
+            │   Morpho Blue     │ ← 단일 컨트랙트 (~650 lines!)
+            │                   │
+            │  Market A:        │
+            │   WETH/USDC       │   ← 각 시장 = (담보, 대출, 오라클, IRM, LLTV) 튜플
+            │   Chainlink       │
+            │   AdaptiveCurve   │
+            │                   │
+            │  Market B:        │
+            │   wstETH/USDC     │   ← 누구나 시장 생성 가능 (permissionless)
+            │   Pyth            │
+            │   FixedRate       │
+            │                   │
+            └───────────────────┘
+                    │
+                    ▼
+            ┌───────────────────┐
+            │  MetaMorpho Vault │ ← ERC-4626 래퍼
+            │  (Curator 관리)    │    여러 시장에 자동 분배
+            └───────────────────┘
+
+핵심: "Uniswap for Lending" — 누구나 렌딩 마켓 생성
+```
+
+### Pool-based와의 핵심 차이 / Key Differences
+
+```
+┌──────────────────┬─────────────────────┬──────────────────────┐
+│                  │ Pool-based          │ P2P (Morpho)         │
+│                  │ (Compound/Aave)     │                      │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 매칭 방식         │ 풀에 모아서 분배     │ 1:1 직접 매칭         │
+│ Matching         │ Pool aggregation    │ Direct matching      │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 이자율 스프레드    │ 큼 (3% vs 7%)       │ 작음 (P2P: 5%)       │
+│ Rate spread      │ Large               │ Small                │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 유동성 위험       │ bank run            │ 매칭 해제 시 풀 전달   │
+│ Liquidity risk   │ Bank run possible   │ Falls back to pool   │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 시장 생성         │ 거버넌스 필요        │ 누구나 가능 (Blue)    │
+│ Market creation  │ Governance required │ Permissionless       │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 코드 복잡도       │ 수천 줄             │ ~650 줄 (Blue)        │
+│ Code complexity  │ Thousands of lines  │ ~650 lines           │
+└──────────────────┴─────────────────────┴──────────────────────┘
+```
+
+---
+
+## 5. Isolated Lending: Silo, Euler V2, Compound III
+
+### 구조 / Architecture
+
+```
+기존 Shared Pool:
+  ┌──────────────────────────────────────┐
+  │  ETH   USDC   LINK   UNI   SHIB     │
+  │  → SHIB exploit = 전체 풀 위험       │
+  └──────────────────────────────────────┘
+
+Isolated (Silo):
+  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐
+  │LINK  │  │UNI   │  │SHIB  │  │AAVE  │
+  │+ETH  │  │+ETH  │  │+ETH  │  │+ETH  │
+  └──────┘  └──────┘  └──────┘  └──────┘
+  → SHIB exploit = SHIB silo만 영향
+
+Modular Vaults (Euler V2):
+  ┌─────────────────────────────────────────────┐
+  │            EVC (Vault Connector)             │
+  │  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐   │
+  │  │Vault1│  │Vault2│  │Vault3│  │Vault4│   │
+  │  │custom│  │custom│  │custom│  │custom│   │
+  │  │params│  │params│  │params│  │params│   │
+  │  └──────┘  └──────┘  └──────┘  └──────┘   │
+  └─────────────────────────────────────────────┘
+  → 각 vault 독립 + EVC로 cross-vault 담보 가능
+
+Single-Asset (Compound III):
+  ┌──────────────┐  ┌──────────────┐
+  │ Comet: USDC  │  │ Comet: WETH  │
+  │              │  │              │
+  │ borrow: USDC │  │ borrow: WETH │
+  │ collat: 여러  │  │ collat: 여러  │
+  │ (ETH,BTC...) │  │ (USDC,DAI..) │
+  └──────────────┘  └──────────────┘
+  → 대출 자산 1개만, 담보는 이자 없음
+```
+
+### Shared Pool과의 핵심 차이 / Key Differences
+
+```
+┌──────────────────┬─────────────────────┬──────────────────────┐
+│                  │ Shared Pool         │ Isolated Lending     │
+│                  │ (Aave V3)           │ (Silo/Euler V2)      │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 리스크 전파       │ 가능 (같은 풀)       │ 불가 (격리)           │
+│ Risk contagion   │ Possible            │ Impossible           │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 자본 효율성       │ 높음 (통합 유동성)    │ 낮음 (분산 유동성)     │
+│ Capital eff.     │ High                │ Lower                │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 자산 추가         │ 거버넌스 투표        │ 누구나 (permissionless)│
+│ Asset listing    │ Governance vote     │ Anyone               │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 오라클 의존       │ 필수                 │ 다양 (없는 경우도)     │
+│ Oracle dep.      │ Required            │ Varies               │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 적합한 경우       │ 검증된 블루칩 자산    │ 롱테일 자산, 새 토큰   │
+│ Best for         │ Blue-chip assets    │ Long-tail assets     │
+└──────────────────┴─────────────────────┴──────────────────────┘
+```
+
+---
+
+## 6. Oracle-Free: Ajna
+
+### 구조 / Architecture
+
+```
+                 예치자 (Lender)
+                    │
+                    │ "ETH를 $2,000 가격 구간에 빌려주겠다"
+                    ▼
+            ┌───────────────────────────────────────┐
+            │           Ajna Pool (ETH/USDC)        │
+            │                                       │
+            │   Price Buckets (50bps 간격):          │
+            │   $2,100 │ ██           ← Alice: 100 USDC │
+            │   $2,050 │ ████         ← Bob: 200 USDC   │
+            │   $2,000 │ ████████     ← Carol: 500 USDC │ ← LUP
+            │   $1,950 │ ██████                          │
+            │   $1,900 │ ████                            │
+            │                                       │
+            │   LUP (Lowest Utilized Price):        │
+            │   = 모든 대출을 커버하는 최저 가격       │
+            │   = 시장 합의 가격                      │
+            │                                       │
+            │   오라클 없음! 대출자가 가격을 설정!      │
+            └───────────────────────────────────────┘
+
+핵심:
+  기존: 오라클이 "ETH = $2,000"이라고 알려줌
+  Ajna: 대출자들이 "나는 $2,000에 빌려주겠다" → 시장이 가격 결정
+```
+
+### 기존 프로토콜과의 핵심 차이 / Key Differences
+
+```
+┌──────────────────┬─────────────────────┬──────────────────────┐
+│                  │ Oracle-based        │ Oracle-free (Ajna)   │
+│                  │ (Aave/Compound)     │                      │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 가격 결정         │ 외부 오라클          │ 대출자가 설정          │
+│ Price source     │ External oracle     │ Lender-set           │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 오라클 공격       │ 가능 (flash loan)    │ 불가능                │
+│ Oracle attack    │ Possible            │ Impossible           │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 거버넌스          │ 필요                 │ 없음 (immutable)      │
+│ Governance       │ Required            │ None                 │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 신규 자산 지원     │ 거버넌스 승인        │ 누구나 풀 생성         │
+│ New asset        │ Governance approval │ Anyone creates pool  │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ NFT 담보          │ 불가                │ 가능 (ERC-721)        │
+│ NFT collateral   │ Not supported       │ Supported            │
+├──────────────────┼─────────────────────┼──────────────────────┤
+│ 가격 효율성       │ 높음 (실시간)         │ 참여자에 의존          │
+│ Price efficiency │ High (real-time)    │ Depends on actors    │
+└──────────────────┴─────────────────────┴──────────────────────┘
+```
+
+---
+
+## 전체 유형 종합 비교 / Complete Type Comparison
+
+```
+┌──────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────┬──────────────┐
+│              │ Pool-based   │ CDP-based    │ Fixed-rate   │ P2P/Hybrid   │ Isolated     │ Oracle-free  │
+│              │ Aave/Comp    │ Maker/Liquity│ Yield        │ Morpho       │ Silo/EulerV2 │ Ajna         │
+│              │ Venus,Radiant│              │ Notional     │ Blue         │ Compound III │              │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ 자금 출처     │ 예치자        │ 프로토콜 발행 │ 프로토콜 발행 │ 예치자(직접)  │ 예치자        │ 예치자        │
+│ Fund source  │ Depositors   │ Minted       │ Minted       │ Direct match │ Depositors   │ Depositors   │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ 이자율        │ 변동         │ 거버넌스/유저 │ 고정          │ P2P 중간     │ 자동 조정     │ 자동 조정     │
+│ Rate type    │ Variable     │ Gov/User-set │ Fixed        │ P2P rate     │ Auto-adjust  │ Auto-adjust  │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ 오라클        │ 필수         │ 필수          │ 필수         │ 선택         │ 선택          │ 없음          │
+│ Oracle       │ Required     │ Required     │ Required     │ Pluggable    │ Pluggable    │ None         │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ 거버넌스      │ 높음         │ 높음/없음     │ 중간         │ 최소          │ 최소          │ 없음         │
+│ Governance   │ High         │ High/None    │ Medium       │ Minimal      │ Minimal      │ None         │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ 리스크 격리   │ 낮음         │ 개별 Vault   │ 시리즈별      │ 시장별        │ 최고          │ 풀별          │
+│ Isolation    │ Low          │ Per-vault    │ Per-series   │ Per-market   │ Highest      │ Per-pool     │
+├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
+│ 비유         │ 은행          │ 중앙은행      │ 채권 시장     │ P2P 플랫폼   │ 개별 금고     │ 자유 시장     │
+│ Analogy      │ Bank         │ Central Bank │ Bond Market  │ P2P Platform │ Safes        │ Free Market  │
+└──────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────────────┴──────────────┘
+```
+
 ## 비유로 이해하기 / Analogy
 
 ```
@@ -414,4 +655,20 @@ Fixed-rate (Yield):
   = 채권 시장 (Bond Market)
   → "1년 후 100만원" 짜리 채권을 지금 95만원에 거래
   → 이자율은 채권 가격(시장)으로 결정
+
+P2P (Morpho):
+  = 직거래 플랫폼 (Peer-to-Peer)
+  → 대출자와 차입자를 직접 연결, 중개 스프레드 제거
+  → 매칭 안 되면 풀로 자동 전환
+
+Isolated (Silo/Euler V2):
+  = 개별 금고 (Safe Deposit Boxes)
+  → 각 자산이 별도 금고에 보관, 하나가 뚫려도 나머지 안전
+  → 자본 효율성 vs 안전성 트레이드오프
+
+Oracle-free (Ajna):
+  = 자유 시장 (Free Market / Bazaar)
+  → 판매자(대출자)가 직접 가격을 붙임
+  → 외부 가격표(오라클) 없이 시장 참여자가 가격 결정
+
 ```

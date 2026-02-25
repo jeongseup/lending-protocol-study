@@ -19,11 +19,13 @@
 4. **상환 (Repay)**: ERC20 전송 → DebtToken 소각
 5. **청산 (Liquidation)**: HF < 1 → 부채 상환 → 담보 + 보너스 수령
 
-### 테스트 결과 / Test Results
+### 테스트 결과 / Test Results (총 69 tests)
 - JumpRateModel: 18 tests (including 3 fuzz tests) ✅
 - Oracle: 13 tests ✅
-- LendingPool: 14 tests ✅
+- LendingPool: 15 tests ✅
 - Liquidation: 6 tests ✅
+- **Scenario: 3 tests (정밀 계산 검증)** ✅
+- **ParameterImpact: 4 tests (파라미터 영향 분석)** ✅
 - InterestRate Fuzz: 6 tests ✅
 - Invariant: 2 tests ✅
 - AaveFork: 2 pass, 2 skipped (need fork URL)
@@ -35,7 +37,7 @@
 
 ## 학습 성과 확인 / Verification
 - [x] LTV, Health Factor, Utilization Rate, Liquidation 설명 가능
-- [ ] Aave V3 스마트 컨트랙트 코드 이해
+- [x] Aave V3 스마트 컨트랙트 코드 이해
 - [x] 기본 렌딩 프로토콜 테스트넷 배포 가능
 - [x] Go 모니터링 도구 빌드 가능
 - [ ] Chainlink 오라클 작동 방식 + 모니터링 방법 설명
