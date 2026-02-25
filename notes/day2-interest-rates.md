@@ -1,4 +1,5 @@
 # Day 2: 이자율 모델 + Solidity 심화
+
 # Day 2: Interest Rate Models + Solidity Deep Dive
 
 ---
@@ -22,13 +23,13 @@
 
 ### 생성/업데이트된 문서
 
-| 문서 | 작업 내용 |
-|------|-----------|
+| 문서                                                                 | 작업 내용                                                                                  |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | [compound-v2-code-reading.md](deep-dive/compound-v2-code-reading.md) | Q&A를 본문에 통합, Architecture Overview 확장 (배포구조/상속/Aave비교), 오라클/청산봇 통합 |
-| [compound-v2-scenario.md](deep-dive/compound-v2-scenario.md) | Kink 설명 추가, 실제 코드 매핑 상세 계산 추가, totalBorrows 분리 저장 설명 통합 |
-| [lending-protocol-types.md](deep-dive/lending-protocol-types.md) | **신규** — Pool-based vs CDP vs Fixed-rate 프로토콜 유형 비교 (Alberto Cuesta 아티클 기반) |
-| [pool-lending-comparison.md](deep-dive/pool-lending-comparison.md) | **신규** — Compound V2 vs Aave V3 vs Euler 시나리오 기반 아키텍처 비교 |
-| [aave-v3-code-reading.md](deep-dive/aave-v3-code-reading.md) | **신규** — Aave V3 코드 리딩 가이드 (Pool/Supply/Borrow/Liquidation, 우리 코드와 비교) |
+| [compound-v2-scenario.md](deep-dive/compound-v2-scenario.md)         | Kink 설명 추가, 실제 코드 매핑 상세 계산 추가, totalBorrows 분리 저장 설명 통합            |
+| [lending-protocol-types.md](deep-dive/lending-protocol-types.md)     | **신규** — Pool-based vs CDP vs Fixed-rate 프로토콜 유형 비교 (Alberto Cuesta 아티클 기반) |
+| [pool-lending-comparison.md](deep-dive/pool-lending-comparison.md)   | **신규** — Compound V2 vs Aave V3 vs Euler 시나리오 기반 아키텍처 비교                     |
+| [aave-v3-code-reading.md](deep-dive/aave-v3-code-reading.md)         | **신규** — Aave V3 코드 리딩 가이드 (Pool/Supply/Borrow/Liquidation, 우리 코드와 비교)     |
 
 ---
 
@@ -60,12 +61,14 @@ kink 초과: "긴급 상태" — 이자율 급등 (빨리 갚아! 유동성이 �
 ```
 
 ### 핵심 파라미터 / Key Parameters
+
 - `baseRate`: 기본 이자율 (예: 2%) — utilization 0%일 때의 이자율
 - `multiplier`: kink 이하 기울기 (예: 10%) — 정상 구간 기울기
 - `jumpMultiplier`: kink 이상 급격한 기울기 (예: 300%) — 긴급 구간 기울기
 - `kink`: 최적 사용률 (보통 80%) — 두 구간의 경계
 
 ### 구현 코드 / Implementation
+
 - `contracts/src/JumpRateModel.sol` — 18개 테스트 통과
 - `contracts/test/JumpRateModel.t.sol`
 - `contracts/test/InterestRate.fuzz.t.sol` — 6개 퍼즈 테스트 통과
@@ -120,4 +123,4 @@ aToken (Aave): 토큰 수량이 자동으로 늘어남 (rebase)
 - [x] Aave V3 코드 분석 → deep-dive/aave-v3-code-reading.md 문서화
   - Pool.sol, SupplyLogic.sol, BorrowLogic.sol, LiquidationLogic.sol
   - 우리 코드(LendingPool.sol)와 비교하며 읽기
-- [ ] 가이드 섹션 5 읽기 / Read guide Section 5 (Interest Rate Models)
+- [x] 가이드 섹션 5 읽기 / Read guide Section 5 (Interest Rate Models)
