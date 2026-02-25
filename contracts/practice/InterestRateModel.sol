@@ -29,7 +29,6 @@ pragma solidity ^0.8.20;
 ///     borrowRate = baseRate + (kink × multiplier) + ((utilization - kink) × jumpMultiplier)
 
 contract InterestRateModel {
-
     // ──────────────────────────────────────
     // 상수 (Constants)
     // ──────────────────────────────────────
@@ -78,13 +77,12 @@ contract InterestRateModel {
     /// @param _multiplier kink 이하 기울기 (1e18 스케일)
     /// @param _jumpMultiplier kink 이상 기울기 (1e18 스케일)
     /// @param _kink 최적 사용률 (1e18 스케일)
-    constructor(
-        uint256 _baseRate,
-        uint256 _multiplier,
-        uint256 _jumpMultiplier,
-        uint256 _kink
-    ) {
+    constructor(uint256 _baseRate, uint256 _multiplier, uint256 _jumpMultiplier, uint256 _kink) {
         // TODO: 4개의 immutable 상태 변수에 생성자 인자를 할당하세요.
+        baseRate = _baseRate;
+        multiplier = _multiplier;
+        jumpMultiplier = _jumpMultiplier;
+        kink = _kink;
     }
 
     // ──────────────────────────────────────
@@ -105,13 +103,12 @@ contract InterestRateModel {
     /// @param totalDeposits 전체 예치 금액 (raw amount)
     /// @param totalBorrows 전체 대출 금액 (raw amount)
     /// @return utilization 사용률 (1e18 스케일, 예: 80% = 0.8e18)
-    function getUtilization(uint256 totalDeposits, uint256 totalBorrows)
-        public
-        pure
-        returns (uint256)
-    {
+    function getUtilization(uint256 totalDeposits, uint256 totalBorrows) public pure returns (uint256) {
         // TODO: 구현하세요.
         // 힌트: 엣지 케이스(0 나누기) 먼저 처리하고, 비율 계산
+        if (totalDeposits == 0) return 0;
+        if (totalBorrows == 0) return 0;
+        return totalBorrows * PRECISION / totalDeposits;
     }
 
     // ──────────────────────────────────────
@@ -138,14 +135,21 @@ contract InterestRateModel {
     /// @param totalDeposits 전체 예치 금액
     /// @param totalBorrows 전체 대출 금액
     /// @return 연간 대출 이자율 (1e18 스케일)
-    function getBorrowRate(uint256 totalDeposits, uint256 totalBorrows)
-        public
-        view
-        returns (uint256)
-    {
+    function getBorrowRate(uint256 totalDeposits, uint256 totalBorrows) public view returns (uint256) {
         // TODO: 구현하세요.
         // 힌트: 먼저 getUtilization()으로 사용률을 구하고,
         //       kink와 비교해서 Case 1 또는 Case 2 적용
+        uint256 utilization = getUtilization(totalDeposits, totalBorrows);
+
+        if (utilization <= kink) {
+            // 정상구간
+            return baseRate + (utilization * multiplier / PRECISION);
+        }
+
+        // 사용률이 높은 구간
+        uint256 normalRate = baseRate + (kink * multiplier / PRECISION);
+        uint256 excessUtil = utilization - kink;
+        return normalRate + (excessUtil * jumpMultiplier / PRECISION);
     }
 
     // ──────────────────────────────────────
@@ -165,13 +169,10 @@ contract InterestRateModel {
     /// @param totalDeposits 전체 예치 금액
     /// @param totalBorrows 전체 대출 금액
     /// @return 초당 대출 이자율 (1e18 스케일)
-    function getBorrowRatePerSecond(uint256 totalDeposits, uint256 totalBorrows)
-        external
-        view
-        returns (uint256)
-    {
+    function getBorrowRatePerSecond(uint256 totalDeposits, uint256 totalBorrows) external view returns (uint256) {
         // TODO: 구현하세요.
         // 힌트: getBorrowRate() 결과를 SECONDS_PER_YEAR로 나누기
+        return getBorrowRate(totalDeposits, totalBorrows) / SECONDS_PER_YEAR;
     }
 
     // ──────────────────────────────────────
@@ -199,12 +200,16 @@ contract InterestRateModel {
     /// @param totalBorrows 전체 대출 금액
     /// @param reserveFactor 준비금 비율 (1e18 스케일, 예: 10% = 0.1e18)
     /// @return 연간 예치 이자율 (1e18 스케일)
-    function getSupplyRate(
-        uint256 totalDeposits,
-        uint256 totalBorrows,
-        uint256 reserveFactor
-    ) external view returns (uint256) {
+    function getSupplyRate(uint256 totalDeposits, uint256 totalBorrows, uint256 reserveFactor)
+        external
+        view
+        returns (uint256)
+    {
         // TODO: 구현하세요.
         // 힌트: 위의 ①②③④ 단계를 순서대로 계산
+        uint256 borrowRate = getBorrowRate(totalDeposits, totalBorrows);
+        uint256 utilization = getUtilization(totalDeposits, totalBorrows);
+        uint256 rateToPool = borrowRate * utilization / PRECISION;
+        return rateToPool * (PRECISION - reserveFactor) / PRECISION;
     }
 }
